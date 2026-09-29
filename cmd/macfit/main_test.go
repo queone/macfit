@@ -336,8 +336,36 @@ func TestReadmePointsToHelpWithoutACopy(t *testing.T) {
 		t.Error("README lacks the line pointing to macfit -h")
 	}
 	for line := range strings.SplitSeq(readme, "\n") {
-		if strings.HasPrefix(line, "macfit v") || strings.Contains(line, "Print macfit v") {
+		if helpCopyLine(line) {
 			t.Errorf("README carries a copy of the help: %q", line)
+		}
+	}
+}
+
+// helpCopyLine reports whether a README line comes from the help: the header,
+// which starts with "macfit v" and a digit, or the version option's row. An
+// example such as "macfit version" is neither.
+func helpCopyLine(line string) bool {
+	rest, header := strings.CutPrefix(line, "macfit v")
+	header = header && rest != "" && rest[0] >= '0' && rest[0] <= '9'
+	return header || strings.Contains(line, "Print macfit v")
+}
+
+func TestHelpCopyLineTellsAHelpLineFromAnExample(t *testing.T) {
+	for _, tc := range []struct {
+		line string
+		want bool
+	}{
+		{"macfit v1.9.0", true},
+		{"  -v, --version     Print macfit v1.9.0 and exit", true},
+		{"macfit version", false},
+		{"macfit validate", false},
+		{"macfit init -N -s ~/data/etc/macfit.store", false},
+		{"macfit v", false},
+		{"", false},
+	} {
+		if got := helpCopyLine(tc.line); got != tc.want {
+			t.Errorf("helpCopyLine(%q) = %v, want %v", tc.line, got, tc.want)
 		}
 	}
 }

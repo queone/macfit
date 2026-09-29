@@ -24,7 +24,7 @@ import (
 
 const (
 	programName    = "macfit"
-	programVersion = "1.9.0"
+	programVersion = "1.9.1"
 )
 
 // storeSource names where the store path came from.
