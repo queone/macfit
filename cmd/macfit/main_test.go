@@ -1102,7 +1102,8 @@ func TestStatusScreen(t *testing.T) {
 		"entries: 3 total, 2 for this Mac",
 		"conflict copies: none",
 		fmt.Sprintf("last save here: in store (generation %d, 2026-09-23 17:55:02)", h.generation()),
-		"drift: M 1, ? 0",
+		"drift: differs 1, missing 0",
+		"  differs  ~/.bashrc",
 	}
 	if len(lines) != len(want) {
 		t.Fatalf("st printed %d lines, want %d:\n%s", len(lines), len(want), out)
@@ -1138,8 +1139,11 @@ func TestStatusScreen(t *testing.T) {
 	if want := "last save here: " + color.Grn5(fmt.Sprintf("in store (generation %d, 2026-09-23 17:55:02)", h.generation())); colored[10] != want {
 		t.Fatalf("colored last save line: %q", colored[10])
 	}
-	if colored[11] != "drift: "+color.Red5("M 1, ? 0") {
+	if colored[11] != "drift: "+color.Red5("differs 1, missing 0") {
 		t.Fatalf("colored drift line: %q", colored[11])
+	}
+	if colored[12] != color.Yel5("  differs  ~/.bashrc") {
+		t.Fatalf("colored differs line: %q", colored[12])
 	}
 	restore := color.SetEnabled(false)
 	defer restore()
@@ -1189,20 +1193,36 @@ func TestStatusDriftAgreesWithDiff(t *testing.T) {
 	h := newHarness(t)
 	outcomeFixture(h)
 	_, diffOut, _ := h.run("diff")
-	counts := map[byte]int{}
+	targets := map[byte][]string{}
 	for l := range strings.SplitSeq(strings.TrimSuffix(diffOut, "\n"), "\n") {
-		counts[l[0]]++
+		target, _, _ := strings.Cut(l[2:], " (")
+		targets[l[0]] = append(targets[l[0]], target)
 	}
-	want := fmt.Sprintf("drift: M %d, ? %d", counts['M'], counts['?'])
-	if counts['M'] < 2 || counts['?'] == 0 {
+	if len(targets['M']) < 2 || len(targets['?']) == 0 {
 		t.Fatalf("fixture must yield a symlink counted as M and a missing file: %q", diffOut)
 	}
-	if out, _ := h.mustFail(1, "st"); !strings.Contains(out, want+"\n") {
-		t.Fatalf("st drift %q not found in %q", want, out)
+	verdict := fmt.Sprintf("differs %d, missing %d", len(targets['M']), len(targets['?']))
+	var want strings.Builder
+	want.WriteString("drift: " + verdict + "\n")
+	for _, k := range []struct {
+		mark byte
+		word string
+	}{{'?', "missing"}, {'M', "differs"}} {
+		sort.Strings(targets[k.mark])
+		for _, target := range targets[k.mark] {
+			want.WriteString("  " + k.word + "  " + target + "\n")
+		}
+	}
+	if out, _ := h.mustFail(1, "st"); !strings.HasSuffix(out, want.String()) {
+		t.Fatalf("st drift %q not at the end of %q", want.String(), out)
 	}
 	defer color.SetEnabled(true)()
-	if _, out, _ := h.run("st"); !strings.Contains(out, "drift: "+color.Red5(fmt.Sprintf("M %d, ? %d", counts['M'], counts['?']))+"\n") {
+	_, out, _ := h.run("st")
+	if !strings.Contains(out, "drift: "+color.Red5(verdict)+"\n") {
 		t.Fatalf("drift verdict not red: %q", out)
+	}
+	if !strings.Contains(out, color.Org5("  missing  "+targets['?'][0])+"\n") {
+		t.Fatalf("missing line not orange: %q", out)
 	}
 	os.Remove(filepath.Join(h.home, ".zshrc"))
 	h.mustRun("rm", "~/.zshrc")
@@ -1215,6 +1235,35 @@ func TestStatusDriftAgreesWithDiff(t *testing.T) {
 	color.SetEnabled(true)
 	if _, out, _ := h.run("st"); !strings.Contains(out, "drift: "+color.Grn5("none")+"\n") {
 		t.Fatalf("clean st not green: %q", out)
+	}
+}
+
+func TestStatusDriftListStopsAtCap(t *testing.T) {
+	h := newHarness(t)
+	h.mustRun("init", "-N")
+	var paths []string
+	for i := range driftListCap + 2 {
+		paths = append(paths, h.write(fmt.Sprintf(".rc%02d", i), "one\n", 0o644))
+	}
+	gone := h.write(".zz-gone", "gone\n", 0o644)
+	h.mustRun(append([]string{"add", gone}, paths...)...)
+	for _, p := range paths {
+		h.write(filepath.Base(p), "two\n", 0o644)
+	}
+	os.Remove(gone)
+	out, _ := h.mustFail(1, "st")
+	var want strings.Builder
+	want.WriteString("drift: differs 12, missing 1\n  missing  ~/.zz-gone\n")
+	for i := range driftListCap - 1 {
+		want.WriteString(fmt.Sprintf("  differs  ~/.rc%02d\n", i))
+	}
+	want.WriteString("           3 more; run `macfit diff` for the full list\n")
+	if !strings.HasSuffix(out, want.String()) {
+		t.Fatalf("capped drift list:\n%s\nwant suffix:\n%s", out, want.String())
+	}
+	defer color.SetEnabled(true)()
+	if _, out, _ := h.run("st"); !strings.HasSuffix(out, color.Gra4("           3 more; run `macfit diff` for the full list")+"\n") {
+		t.Fatalf("overflow hint not grey: %q", out)
 	}
 }
 

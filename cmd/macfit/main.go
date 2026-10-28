@@ -24,7 +24,7 @@ import (
 
 const (
 	programName    = "macfit"
-	programVersion = "1.9.4"
+	programVersion = "1.10.0"
 )
 
 // storeSource names where the store path came from.
@@ -1162,6 +1162,12 @@ func (a *app) driftOf(st *lockbox.Store, e lockbox.Entry) (string, error) {
 	return "M", nil
 }
 
+// driftListCap is the most drifted targets st lists before it points at diff.
+const driftListCap = 10
+
+// driftIndent lines the overflow hint up with the targets in st's drift list.
+var driftIndent = strings.Repeat(" ", len("  missing  "))
+
 // cmdSt prints one status screen for the store, the key, and this Mac's drift.
 func (a *app) cmdSt(ref storeRef, args []string) int {
 	if len(args) > 0 {
@@ -1272,20 +1278,34 @@ func (a *app) cmdSt(ref storeRef, args []string) int {
 		rc = 1
 		kv("last save here", color.Red5(fmt.Sprintf("lost: %s at %s (generation %d); run it again", rec.Action, when, rec.Generation)))
 	}
-	counts := map[string]int{}
+	drift := map[string][]string{}
 	for _, e := range sel {
 		mark, err := a.driftOf(st, e)
 		if err != nil {
 			a.errorf("st: %s: %s", e.Target, err)
 			return 1
 		}
-		counts[mark]++
+		drift[mark] = append(drift[mark], e.Target)
 	}
-	if counts["M"] == 0 && counts["?"] == 0 {
+	total := len(drift["M"]) + len(drift["?"])
+	if total == 0 {
 		kv("drift", color.Grn5("none"))
 		return rc
 	}
-	kv("drift", color.Red5(fmt.Sprintf("M %d, ? %d", counts["M"], counts["?"])))
+	kv("drift", color.Red5(fmt.Sprintf("differs %d, missing %d", len(drift["M"]), len(drift["?"]))))
+	// Missing files come first: they are fewer, and each needs pull -f or rm.
+	shown := 0
+	for _, k := range []struct{ mark, word string }{{"?", "missing"}, {"M", "differs"}} {
+		targets := drift[k.mark]
+		slices.Sort(targets)
+		for _, t := range targets[:min(len(targets), driftListCap-shown)] {
+			fmt.Fprintln(a.stdout, paint(k.mark, "  "+k.word+"  "+t))
+			shown++
+		}
+	}
+	if more := total - shown; more > 0 {
+		fmt.Fprintln(a.stdout, color.Gra4(fmt.Sprintf("%s%d more; run `macfit diff` for the full list", driftIndent, more)))
+	}
 	return 1
 }
 
