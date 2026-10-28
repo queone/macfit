@@ -1,9 +1,9 @@
 module github.com/queone/macfit
 
-go 1.26.4
+go 1.27.2
 
 require (
-	github.com/queone/gkit v0.87.0
+	github.com/queone/gkit v0.92.0
 	golang.org/x/term v0.46.0
 )
 

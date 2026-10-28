@@ -6,7 +6,7 @@ macfit keeps Mac config files in one encrypted store and restores them on any Ma
 
 ## System Summary
 
-macfit registers live files, captures their content and mode as versions in one sealed store file, and restores them on any Mac that can open the store. It writes nothing but the store file, the remembered-path pointer, and a last-save record.
+macfit registers live files, captures their content and mode as versions in one sealed store file, and restores them on any Mac that can open the store. It writes nothing but the store file, the remembered-path pointer, a last-save record, and an update-check cache.
 
 ## Current Platform
 
@@ -50,6 +50,8 @@ Integrated audit adoption is the only command-mediated phase exception. It can a
 - Every save adds a row to the store's save log and records it in `$XDG_STATE_HOME/macfit/last-save-KEYID`, so a Mac notices when another Mac's copy replaced its save.
 - `pull` only plans unless given `-f`, and `pull`, `push`, and `diff` refuse symlinks.
 - lockbox comes from `github.com/queone/gkit` at a pinned version. Raise that version deliberately.
+- The store records the highest macfit version that ever saved it, so a Mac running an older macfit sees a warning instead of silently misreading a newer store.
+- `st` is the only command that makes a network request: gkit's `update` package asks the Go module proxy for the latest release at most once a day. macfit only reports a newer release and never installs itself, because a self-updating tool that holds the store key would turn a compromised repository into code execution on every Mac.
 
 ## Conventions
 

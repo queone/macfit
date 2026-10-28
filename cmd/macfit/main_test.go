@@ -14,6 +14,7 @@ import (
 
 	"github.com/queone/gkit/color"
 	"github.com/queone/gkit/lockbox"
+	"github.com/queone/gkit/update"
 )
 
 // testKDF keeps passphrase derivation fast in tests.
@@ -68,6 +69,10 @@ func newHarness(t *testing.T) *harness {
 		readSecret: func(string) ([]byte, error) { return []byte("pw"), nil },
 		readLine:   func(string) (string, error) { return "", nil },
 		now:        func() time.Time { return testNow },
+		// No test reaches the module proxy; update tests swap in their own result.
+		checkUpdate: func() (update.Result, error) {
+			return update.Result{Current: thisVersion, Skipped: "no network in tests"}, nil
+		},
 	}
 	return h
 }
@@ -284,7 +289,7 @@ func TestHelpLayoutMatchesTheOtherUtilities(t *testing.T) {
 			}
 			last = idx
 		}
-		for _, want := range []string{"  -N, --new ", "  -h, -?, --help", "Store path order: -s, then MACFIT_STORE", "plan the restore, or write it with -f", "Print the pull plan; the default", "  render [-o DIR] [-a] [-f]", "  cat TARGET [-H HOST]", "  -o, --out DIR ", "  -a, --all ", "  st ", "  set TARGET [flags]", "  -g, --global ", "  -m, --mode MODE ", "  -F, --from WHICH ", "  -S, --sort FIELD ", "  ls [-S FIELD]", "register live files for this Mac", "status of the store, key, last save, and drift"} {
+		for _, want := range []string{"  -N, --new ", "  -h, -?, --help", "Store path order: -s, then MACFIT_STORE", "plan the restore, or write it with -f", "Print the pull plan; the default", "  render [-o DIR] [-a] [-f]", "  cat TARGET [-H HOST]", "  -o, --out DIR ", "  -a, --all ", "  st ", "  set TARGET [flags]", "  -g, --global ", "  -m, --mode MODE ", "  -F, --from WHICH ", "  -S, --sort FIELD ", "  ls [-S FIELD]", "register live files for this Mac", "status of the store, key, last save, writer version, update, and drift"} {
 			if !strings.Contains(out, want) {
 				t.Fatalf("%s: help lacks %q", arg, want)
 			}
@@ -1102,6 +1107,8 @@ func TestStatusScreen(t *testing.T) {
 		"entries: 3 total, 2 for this Mac",
 		"conflict copies: none",
 		fmt.Sprintf("last save here: in store (generation %d, 2026-09-23 17:55:02)", h.generation()),
+		"written by: " + thisVersion,
+		"update: skipped (no network in tests)",
 		"drift: differs 1, missing 0",
 		"  differs  ~/.bashrc",
 	}
@@ -1139,11 +1146,14 @@ func TestStatusScreen(t *testing.T) {
 	if want := "last save here: " + color.Grn5(fmt.Sprintf("in store (generation %d, 2026-09-23 17:55:02)", h.generation())); colored[10] != want {
 		t.Fatalf("colored last save line: %q", colored[10])
 	}
-	if colored[11] != "drift: "+color.Red5("differs 1, missing 0") {
-		t.Fatalf("colored drift line: %q", colored[11])
+	if colored[11] != "written by: "+color.Gra4(thisVersion) {
+		t.Fatalf("colored written-by line: %q", colored[11])
 	}
-	if colored[12] != color.Yel5("  differs  ~/.bashrc") {
-		t.Fatalf("colored differs line: %q", colored[12])
+	if colored[13] != "drift: "+color.Red5("differs 1, missing 0") {
+		t.Fatalf("colored drift line: %q", colored[13])
+	}
+	if colored[14] != color.Yel5("  differs  ~/.bashrc") {
+		t.Fatalf("colored differs line: %q", colored[14])
 	}
 	restore := color.SetEnabled(false)
 	defer restore()
@@ -1179,7 +1189,7 @@ func TestStatusScreen(t *testing.T) {
 
 	fresh := newHarness(t)
 	out, _ = fresh.mustFail(1, "st")
-	for _, w := range []string{"remembered: none", "store file: missing", "key id: unknown", "login keychain: unknown", "store opens: no (store file missing)", "entries: unknown", "last save here: unknown", "drift: unknown"} {
+	for _, w := range []string{"remembered: none", "store file: missing", "key id: unknown", "login keychain: unknown", "store opens: no (store file missing)", "entries: unknown", "last save here: unknown", "written by: unknown", "update: skipped (no network in tests)", "drift: unknown"} {
 		if !strings.Contains(out, w+"\n") {
 			t.Fatalf("st without store lacks %q: %q", w, out)
 		}
@@ -1264,6 +1274,155 @@ func TestStatusDriftListStopsAtCap(t *testing.T) {
 	defer color.SetEnabled(true)()
 	if _, out, _ := h.run("st"); !strings.HasSuffix(out, color.Gra4("           3 more; run `macfit diff` for the full list")+"\n") {
 		t.Fatalf("overflow hint not grey: %q", out)
+	}
+}
+
+func TestStatusUpdateLine(t *testing.T) {
+	h := newHarness(t)
+	h.mustRun("init", "-N")
+	install := "run go install github.com/queone/macfit/cmd/macfit@v99.0.0"
+	cases := []struct {
+		name   string
+		result update.Result
+		err    error
+		want   string
+		yellow bool
+	}{
+		{"newer", update.Result{Latest: "v99.0.0", Available: true, CheckedAt: testNow}, nil, "v99.0.0 available; " + install, true},
+		{"current", update.Result{Latest: thisVersion, CheckedAt: testNow}, nil, "none (" + thisVersion + " is the latest, checked 2026-09-23 17:55:02)", false},
+		{"no release", update.Result{CheckedAt: testNow}, nil, "none (checked 2026-09-23 17:55:02)", false},
+		{"skipped", update.Result{Skipped: "NO_UPDATE_CHECK is set"}, nil, "skipped (NO_UPDATE_CHECK is set)", false},
+		{"failed", update.Result{}, errors.New("proxy timed out"), "unknown (proxy timed out)", false},
+		{"recent failure, no cache", update.Result{Skipped: update.SkippedRecentFailure}, nil, "unknown (recent check failed)", false},
+		{"recent failure, cached", update.Result{Latest: "v99.0.0", Available: true, CheckedAt: testNow, FromCache: true, Skipped: update.SkippedRecentFailure}, nil, "v99.0.0 available; " + install, true},
+	}
+	for _, c := range cases {
+		h.app.checkUpdate = func() (update.Result, error) { return c.result, c.err }
+		code, out, _ := h.run("st")
+		if code != 0 {
+			t.Fatalf("%s: st exit %d, want 0: %q", c.name, code, out)
+		}
+		if !strings.Contains(out, "\nupdate: "+c.want+"\n") {
+			t.Fatalf("%s: no update line %q in %q", c.name, c.want, out)
+		}
+		paint := color.Gra4
+		if c.yellow {
+			paint = color.Yel5
+		}
+		restore := color.SetEnabled(true)
+		_, out, _ = h.run("st")
+		want := "\nupdate: " + paint(c.want) + "\n"
+		restore()
+		if !strings.Contains(out, want) {
+			t.Fatalf("%s: update line not colored as expected: %q", c.name, out)
+		}
+	}
+
+	t.Setenv("NO_UPDATE_CHECK", "1")
+	h.app.checkUpdate = checkUpdate
+	if out := h.mustRun("st"); !strings.Contains(out, "\nupdate: skipped (NO_UPDATE_CHECK is set)\n") {
+		t.Fatalf("production check with NO_UPDATE_CHECK: %q", out)
+	}
+}
+
+// setWriterVersion stamps v into the harness store as another macfit would.
+func (h *harness) setWriterVersion(v string) {
+	h.t.Helper()
+	st := h.openStore()
+	defer st.Close()
+	if err := st.SetWriterVersion(v); err != nil {
+		h.t.Fatal(err)
+	}
+	if err := st.Save(); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// writerVersion reads the harness store's recorded writer version.
+func (h *harness) writerVersion() string {
+	h.t.Helper()
+	st := h.openStore()
+	defer st.Close()
+	v, err := st.WriterVersion()
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return v
+}
+
+func TestWriterVersion(t *testing.T) {
+	h := newHarness(t)
+	h.mustRun("init", "-N")
+	live := h.write(".bashrc", "one\n", 0o644)
+	h.mustRun("add", live)
+	if v := h.writerVersion(); v != thisVersion {
+		t.Fatalf("writer version after add: %q, want %q", v, thisVersion)
+	}
+
+	h.setWriterVersion("v99.0.0")
+	code, out, errs := h.run("diff")
+	if code != 0 {
+		t.Fatalf("diff on a clean store written by a newer macfit: exit %d: %q", code, out)
+	}
+	if want := "macfit: warning: macfit v99.0.0 last wrote this store, newer than this " + thisVersion +
+		"; run go install github.com/queone/macfit/cmd/macfit@v99.0.0\n"; errs != want {
+		t.Fatalf("diff stderr %q, want %q", errs, want)
+	}
+	newer := "v99.0.0, newer than this macfit (" + thisVersion + "); run go install github.com/queone/macfit/cmd/macfit@v99.0.0"
+	if out := h.mustRun("st"); !strings.Contains(out, "\nwritten by: "+newer+"\n") {
+		t.Fatalf("st written-by line: %q", out)
+	}
+	defer color.SetEnabled(true)()
+	if _, out, _ := h.run("st"); !strings.Contains(out, "\nwritten by: "+color.Yel5(newer)+"\n") {
+		t.Fatalf("newer writer not yellow: %q", out)
+	}
+	restore := color.SetEnabled(false)
+	defer restore()
+
+	h.write(".bashrc", "two\n", 0o644)
+	h.mustRun("push")
+	if v := h.writerVersion(); v != "v99.0.0" {
+		t.Fatalf("an older macfit lowered the writer version to %q", v)
+	}
+
+	h.setWriterVersion("v0.0.1")
+	h.write(".bashrc", "three\n", 0o644)
+	h.mustRun("push")
+	if v := h.writerVersion(); v != thisVersion {
+		t.Fatalf("writer version after a newer macfit saved: %q, want %q", v, thisVersion)
+	}
+	if _, errs := h.mustFail(0, "diff"); errs != "" {
+		t.Fatalf("diff warned about an older writer: %q", errs)
+	}
+}
+
+func TestStatusWithoutWriterVersion(t *testing.T) {
+	h := newHarness(t)
+	key, err := lockbox.NewKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := lockbox.NewKeyID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hdr := lockbox.Header{KeyID: id}
+	if err := hdr.WrapKey(key, []byte("pw"), testKDF); err != nil {
+		t.Fatal(err)
+	}
+	st, err := lockbox.Create(h.store, hdr, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Save(); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	if err := h.keys.Put(lockbox.KeyIDString(id), key); err != nil {
+		t.Fatal(err)
+	}
+	if _, out, _ := h.run("st"); !strings.Contains(out, "\nwritten by: none recorded\n") {
+		t.Fatalf("st on a store no macfit stamped: %q", out)
 	}
 }
 

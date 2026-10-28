@@ -19,13 +19,22 @@ import (
 	"github.com/queone/gkit/color"
 	"github.com/queone/gkit/help"
 	"github.com/queone/gkit/lockbox"
+	"github.com/queone/gkit/update"
 	"golang.org/x/term"
 )
 
 const (
 	programName    = "macfit"
-	programVersion = "1.10.1"
+	programVersion = "1.11.0"
+	// modulePath is the Go module the update check asks the proxy about.
+	modulePath = "github.com/queone/macfit"
+	// installPath is the package the upgrade hint tells the user to install.
+	installPath = modulePath + "/cmd/macfit"
 )
+
+// thisVersion is programVersion as a module version, the form the store and
+// the module proxy use.
+const thisVersion = "v" + programVersion
 
 // storeSource names where the store path came from.
 type storeSource string
@@ -45,38 +54,50 @@ type storeRef struct {
 
 // app carries the process-level dependencies so tests can swap them for fakes.
 type app struct {
-	stdout     io.Writer
-	stderr     io.Writer
-	stdin      io.Reader
-	keys       lockbox.KeyStore
-	env        lockbox.Env
-	host       string
-	kdf        lockbox.KDF
-	goos       string
-	storeEnv   string
-	isTerminal func() bool
-	readSecret func(prompt string) ([]byte, error)
-	readLine   func(prompt string) (string, error)
-	now        func() time.Time
+	stdout      io.Writer
+	stderr      io.Writer
+	stdin       io.Reader
+	keys        lockbox.KeyStore
+	env         lockbox.Env
+	host        string
+	kdf         lockbox.KDF
+	goos        string
+	storeEnv    string
+	isTerminal  func() bool
+	readSecret  func(prompt string) ([]byte, error)
+	readLine    func(prompt string) (string, error)
+	now         func() time.Time
+	checkUpdate func() (update.Result, error)
 }
 
 func newApp() *app {
 	a := &app{
-		stdout:     os.Stdout,
-		stderr:     os.Stderr,
-		stdin:      os.Stdin,
-		keys:       lockbox.SecurityKeyStore{Service: "macfit"},
-		env:        lockbox.EnvFromOS(),
-		host:       lockbox.Hostname(lockbox.DefaultExecutor, os.Hostname),
-		kdf:        lockbox.DefaultKDF,
-		goos:       runtime.GOOS,
-		storeEnv:   os.Getenv("MACFIT_STORE"),
-		isTerminal: func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
-		readSecret: terminalSecret,
-		now:        time.Now,
+		stdout:      os.Stdout,
+		stderr:      os.Stderr,
+		stdin:       os.Stdin,
+		keys:        lockbox.SecurityKeyStore{Service: "macfit"},
+		env:         lockbox.EnvFromOS(),
+		host:        lockbox.Hostname(lockbox.DefaultExecutor, os.Hostname),
+		kdf:         lockbox.DefaultKDF,
+		goos:        runtime.GOOS,
+		storeEnv:    os.Getenv("MACFIT_STORE"),
+		isTerminal:  func() bool { return term.IsTerminal(int(os.Stdin.Fd())) },
+		readSecret:  terminalSecret,
+		now:         time.Now,
+		checkUpdate: checkUpdate,
 	}
 	a.readLine = a.terminalLine
 	return a
+}
+
+// checkUpdate asks the module proxy, at most once a day, whether a newer
+// macfit exists. It never installs anything.
+func checkUpdate() (update.Result, error) {
+	dir, err := update.CacheDir(programName)
+	if err != nil {
+		return update.Result{Current: thisVersion}, err
+	}
+	return update.Check(update.Options{Module: modulePath, Current: thisVersion, CacheFile: filepath.Join(dir, "update-check")})
 }
 
 // terminalSecret prompts on stderr and reads one line with echo off.
@@ -122,7 +143,7 @@ func helpDoc() help.Doc {
 					"init needs a terminal for the passphrase prompt and creates only the default folder.",
 				}},
 			{Title: "Commands", Rows: []help.Row{
-				{Form: "st", Meaning: "status of the store, key, last save, and drift"},
+				{Form: "st", Meaning: "status of the store, key, last save, writer version, update, and drift"},
 				{Form: "init [-N]", Meaning: "unlock an existing store, or create one with -N"},
 				{Form: "add PATH... [-H HOST|-g]", Meaning: "register live files for this Mac and capture them"},
 				{Form: "set TARGET [flags]", Meaning: "change an entry's Mac binding or mode (-H, -g, -m, -F)"},
@@ -405,6 +426,9 @@ func (a *app) openStore(path string) (*lockbox.Store, error) {
 		a.errorf("warning: this Mac's last save (%s at %s) is missing from the store; another Mac's copy replaced it. Run it again.",
 			rec.Action, rec.At.Local().Format(time.DateTime))
 	}
+	if v, err := st.WriterVersion(); err == nil && update.Newer(v, thisVersion) {
+		a.errorf("warning: macfit %s last wrote this store, newer than this %s; run go install %s@%s", v, thisVersion, installPath, v)
+	}
 	return st, nil
 }
 
@@ -421,6 +445,17 @@ func (a *app) lastSaveOf(st *lockbox.Store) string {
 // save writes the store with a save-log row naming action, then records the
 // save as this Mac's last one. A record that cannot be written only warns.
 func (a *app) save(st *lockbox.Store, action string) error {
+	// Record this macfit as the store's writer unless a newer one already
+	// wrote it, so an older Mac never lowers the version.
+	stored, err := st.WriterVersion()
+	if err != nil {
+		return err
+	}
+	if stored == "" || update.Newer(thisVersion, stored) {
+		if err := st.SetWriterVersion(thisVersion); err != nil {
+			return err
+		}
+	}
 	r, err := st.SaveLogged(a.host, action, a.now())
 	if err != nil {
 		return err
@@ -1162,6 +1197,28 @@ func (a *app) driftOf(st *lockbox.Store, e lockbox.Entry) (string, error) {
 	return "M", nil
 }
 
+// updateStatus prints st's update line: yellow with the install command when
+// the module proxy has a newer macfit, grey otherwise. It never changes the
+// exit code.
+func (a *app) updateStatus(kv, grey func(label, value string)) {
+	r, err := a.checkUpdate()
+	checked := r.CheckedAt.Local().Format(time.DateTime)
+	switch {
+	case err != nil:
+		grey("update", "unknown ("+err.Error()+")")
+	case r.Skipped == update.SkippedRecentFailure && r.Latest == "":
+		grey("update", "unknown ("+r.Skipped+")")
+	case r.Skipped != "" && r.Skipped != update.SkippedRecentFailure:
+		grey("update", "skipped ("+r.Skipped+")")
+	case r.Available:
+		kv("update", color.Yel5(fmt.Sprintf("%s available; run go install %s@%s", r.Latest, installPath, r.Latest)))
+	case r.Latest == "":
+		grey("update", "none (checked "+checked+")")
+	default:
+		grey("update", fmt.Sprintf("none (%s is the latest, checked %s)", r.Latest, checked))
+	}
+}
+
 // driftListCap is the most drifted targets st lists before it points at diff.
 const driftListCap = 10
 
@@ -1260,6 +1317,8 @@ func (a *app) cmdSt(ref storeRef, args []string) int {
 	}
 	if st == nil {
 		grey("last save here", "unknown")
+		grey("written by", "unknown")
+		a.updateStatus(kv, grey)
 		grey("drift", "unknown")
 		return rc
 	}
@@ -1278,6 +1337,17 @@ func (a *app) cmdSt(ref storeRef, args []string) int {
 		rc = 1
 		kv("last save here", color.Red5(fmt.Sprintf("lost: %s at %s (generation %d); run it again", rec.Action, when, rec.Generation)))
 	}
+	switch v, err := st.WriterVersion(); {
+	case err != nil:
+		grey("written by", "unknown ("+err.Error()+")")
+	case v == "":
+		grey("written by", "none recorded")
+	case update.Newer(v, thisVersion):
+		kv("written by", color.Yel5(fmt.Sprintf("%s, newer than this macfit (%s); run go install %s@%s", v, thisVersion, installPath, v)))
+	default:
+		grey("written by", v)
+	}
+	a.updateStatus(kv, grey)
 	drift := map[string][]string{}
 	for _, e := range sel {
 		mark, err := a.driftOf(st, e)
