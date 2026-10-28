@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 1.10.1 | AC6 adopt Govna governance files v0.81.1 |
 | 1.10.0 | macfit st lists drifted targets as missing or differs, capped at 10 lines |
 | 1.9.4 | AC5 adopt Govna governance files v0.71.0 |
 | 1.9.3 | AC4 adopt Govna governance files v0.70.0 |
