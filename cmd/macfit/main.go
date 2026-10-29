@@ -25,7 +25,7 @@ import (
 
 const (
 	programName    = "macfit"
-	programVersion = "1.11.0"
+	programVersion = "1.11.1"
 	// modulePath is the Go module the update check asks the proxy about.
 	modulePath = "github.com/queone/macfit"
 	// installPath is the package the upgrade hint tells the user to install.
