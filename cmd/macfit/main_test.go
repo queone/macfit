@@ -1294,6 +1294,8 @@ func TestStatusUpdateLine(t *testing.T) {
 		{"no release", update.Result{CheckedAt: testNow}, nil, "none (checked 2026-09-23 17:55:02)", false},
 		{"skipped", update.Result{Skipped: "NO_UPDATE_CHECK is set"}, nil, "skipped (NO_UPDATE_CHECK is set)", false},
 		{"failed", update.Result{}, errors.New("proxy timed out"), "unknown (proxy timed out)", false},
+		{"cache write failed after a newer release", update.Result{Current: thisVersion, Latest: "v99.0.0", Available: true, CheckedAt: testNow}, errors.New("write update cache: disk full"), "v99.0.0 available; " + install, true},
+		{"cache write failed after the running release", update.Result{Current: thisVersion, Latest: thisVersion, CheckedAt: testNow}, errors.New("write update cache: disk full"), "none (" + thisVersion + " is the latest, checked 2026-09-23 17:55:02)", false},
 		{"failed request and cache write", update.Result{Current: thisVersion}, errors.Join(errors.New("proxy timed out"), errors.New("write update cache: disk full")), "unknown (proxy timed out; write update cache: disk full)", false},
 		{"recent failure, no cache", update.Result{Skipped: update.SkippedRecentFailure}, nil, "unknown (recent check failed)", false},
 		{"recent failure, cached", update.Result{Latest: "v99.0.0", Available: true, CheckedAt: testNow, FromCache: true, Skipped: update.SkippedRecentFailure}, nil, "v99.0.0 available; " + install, true},

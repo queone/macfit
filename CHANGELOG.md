@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 1.13.0 | macfit st shows the update result when only the update cache write fails |
 | 1.12.0 | AC9 macfit st calls a release the latest only when it is the running version |
 | 1.11.1 | AC8 adopt Govna governance files v0.85.0 |
 | 1.11.0 | AC7 macfit st shows newer releases and the store writer version |

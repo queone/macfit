@@ -2,6 +2,18 @@
 
 > One section per release, newest first: what the release added, changed, removed, or deferred in the product, its design, and its code, and why. Governance, toolchain, and release mechanics stay in `CHANGELOG.md` and git. Settled design is in `arch.md`. Search it to learn why a release changed the product.
 
+## v1.13.0
+
+Changed:
+- `st` shows the update result when the proxy check succeeds but the cache write fails.
+- `st` shows `unknown (ERROR)` only when the proxy check itself fails.
+
+Decisions:
+- The Director chose direct handling with no acceptance criteria document.
+
+Risks:
+- A failed cache write now goes unreported, so every `st` asks the proxy until the write succeeds.
+
 ## v1.12.0
 
 Changed:

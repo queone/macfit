@@ -25,7 +25,7 @@ import (
 
 const (
 	programName    = "macfit"
-	programVersion = "1.12.0"
+	programVersion = "1.13.0"
 	// modulePath is the Go module the update check asks the proxy about.
 	modulePath = "github.com/queone/macfit"
 	// installPath is the package the upgrade hint tells the user to install.
@@ -1200,12 +1200,13 @@ func (a *app) driftOf(st *lockbox.Store, e lockbox.Entry) (string, error) {
 // updateStatus prints st's update line: yellow with the install command when
 // the module proxy has a newer macfit, grey otherwise. It names a release as
 // the latest only when it is the running version, because a proxy that lags
-// a new tag returns the release before it. It never changes the exit code.
+// a new tag returns the release before it. A failed cache write after a
+// successful check still shows the result. It never changes the exit code.
 func (a *app) updateStatus(kv, grey func(label, value string)) {
 	r, err := a.checkUpdate()
 	checked := r.CheckedAt.Local().Format(time.DateTime)
 	switch {
-	case err != nil:
+	case err != nil && r.CheckedAt.IsZero():
 		// update.Check joins a failed request and a failed cache write.
 		grey("update", "unknown ("+strings.ReplaceAll(err.Error(), "\n", "; ")+")")
 	case r.Skipped == update.SkippedRecentFailure && r.Latest == "":
