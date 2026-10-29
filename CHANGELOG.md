@@ -3,6 +3,7 @@
 | Version | Summary |
 |---------|---------|
 | Unreleased | |
+| 1.12.0 | AC9 macfit st calls a release the latest only when it is the running version |
 | 1.11.1 | AC8 adopt Govna governance files v0.85.0 |
 | 1.11.0 | AC7 macfit st shows newer releases and the store writer version |
 | 1.10.1 | AC6 adopt Govna governance files v0.81.1 |

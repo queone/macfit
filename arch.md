@@ -51,7 +51,7 @@ Integrated audit adoption is the only command-mediated phase exception. It can a
 - `pull` only plans unless given `-f`, and `pull`, `push`, and `diff` refuse symlinks.
 - lockbox comes from `github.com/queone/gkit` at a pinned version. Raise that version deliberately.
 - The store records the highest macfit version that ever saved it, so a Mac running an older macfit sees a warning instead of silently misreading a newer store.
-- `st` is the only command that makes a network request: gkit's `update` package asks the Go module proxy for the latest release at most once a day. macfit only reports a newer release and never installs itself, because a self-updating tool that holds the store key would turn a compromised repository into code execution on every Mac.
+- `st` is the only command that makes a network request: gkit's `update` package asks the Go module proxy for the latest release at most once a day and once more after an upgrade. macfit only reports a newer release and never installs itself, because a self-updating tool that holds the store key would turn a compromised repository into code execution on every Mac.
 
 ## Conventions
 

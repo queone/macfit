@@ -25,7 +25,7 @@ import (
 
 const (
 	programName    = "macfit"
-	programVersion = "1.11.1"
+	programVersion = "1.12.0"
 	// modulePath is the Go module the update check asks the proxy about.
 	modulePath = "github.com/queone/macfit"
 	// installPath is the package the upgrade hint tells the user to install.
@@ -90,8 +90,8 @@ func newApp() *app {
 	return a
 }
 
-// checkUpdate asks the module proxy, at most once a day, whether a newer
-// macfit exists. It never installs anything.
+// checkUpdate asks the module proxy, at most once a day and once more after
+// an upgrade, whether a newer macfit exists. It never installs anything.
 func checkUpdate() (update.Result, error) {
 	dir, err := update.CacheDir(programName)
 	if err != nil {
@@ -1198,24 +1198,26 @@ func (a *app) driftOf(st *lockbox.Store, e lockbox.Entry) (string, error) {
 }
 
 // updateStatus prints st's update line: yellow with the install command when
-// the module proxy has a newer macfit, grey otherwise. It never changes the
-// exit code.
+// the module proxy has a newer macfit, grey otherwise. It names a release as
+// the latest only when it is the running version, because a proxy that lags
+// a new tag returns the release before it. It never changes the exit code.
 func (a *app) updateStatus(kv, grey func(label, value string)) {
 	r, err := a.checkUpdate()
 	checked := r.CheckedAt.Local().Format(time.DateTime)
 	switch {
 	case err != nil:
-		grey("update", "unknown ("+err.Error()+")")
+		// update.Check joins a failed request and a failed cache write.
+		grey("update", "unknown ("+strings.ReplaceAll(err.Error(), "\n", "; ")+")")
 	case r.Skipped == update.SkippedRecentFailure && r.Latest == "":
 		grey("update", "unknown ("+r.Skipped+")")
 	case r.Skipped != "" && r.Skipped != update.SkippedRecentFailure:
 		grey("update", "skipped ("+r.Skipped+")")
 	case r.Available:
 		kv("update", color.Yel5(fmt.Sprintf("%s available; run go install %s@%s", r.Latest, installPath, r.Latest)))
-	case r.Latest == "":
-		grey("update", "none (checked "+checked+")")
-	default:
+	case r.Latest != "" && r.Latest == r.Current:
 		grey("update", fmt.Sprintf("none (%s is the latest, checked %s)", r.Latest, checked))
+	default:
+		grey("update", "none (checked "+checked+")")
 	}
 }
 
